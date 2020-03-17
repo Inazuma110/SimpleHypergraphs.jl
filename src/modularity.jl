@@ -54,17 +54,72 @@ the precomputed aggregates `ha`.
 """
 @inline function LightGraphs.modularity(h::Hypergraph, partition::Vector{Set{Int}},
         ha::HypergraphAggs=HypergraphAggs(h))
-        
     @boundscheck sum(length.(partition)) == nhv(h)
     @boundscheck union(partition...) == Set(1:nhv(h))
-    volP_volV = [sum(ha.deg_vs[i] for i in p)/ha.volV for p in partition]
-    eP = [count(i-> ha.hes[i]>0 && (keys(h.he2v[i]) ⊆ p), 1:nhe(h)) for p in partition]
-    (sum(eP) - sum( ha.Ed[d]*sum(volP_volV.^d) for d in 1:ha.max_hes)) / nhe(h)
+    return my_mod(h, partition)
+
+    # volP_volV = [sum(ha.deg_vs[i] for i in p)/ha.volV for p in partition]
+    # eP = [count(i-> ha.hes[i]>0 && (keys(h.he2v[i]) ⊆ p), 1:nhe(h)) for p in partition]
+    # (sum(eP) - sum( ha.Ed[d]*sum(volP_volV.^d) for d in 1:ha.max_hes)) / nhe(h)
+end
+
+function my_mod(h, part)
+  ml = 0
+  mr = 0
+  v = 0
+  for i in 1:nhv(h)
+    v += length(gethyperedges(h, i))
+  end
+  dict = Dict([])
+  for i in 1:nhe(h)
+    dict[length(getvertices(h, i))] = get(dict, length(getvertices(h, i)), 0) + 1
+  end
+
+  va = Dict([i => 0.0 for i in 1:length(part)])
+  for (i, cluster) in enumerate(part)
+    for node in cluster
+      va[i] += length(gethyperedges(h, node))
+    end
+    va[i] /= v
+  end
+
+  for (key, val) in dict
+    tmp = 0
+    for (key2, val2) in va
+      tmp += (val2 ^ key)
+    end
+    tmp *= val
+    mr += tmp
+  end
+
+  n2c = [-1 for i in 1:nhv(h)]
+  for (num, cluster) in enumerate(part)
+    for node in cluster
+      n2c[node] = num
+    end
+  end
+
+
+  for he_i in 1:nhe(h)
+    he = [k for (k, v) in getvertices(h, he_i)]
+    flag = true
+    fnode_cluster = n2c[he[1]]
+    for node in he
+      if n2c[node] != fnode_cluster
+        flag = false
+        break
+      end
+    end
+    if flag ml += 1 end
+  end
+
+  (ml - mr) / nhe(h)
 end
 
 
+
 """
-The base type for all algorithms representing various community search patterns. 
+The base type for all algorithms representing various community search patterns.
 """
 abstract type AbstractCommunityFinder end
 
@@ -131,7 +186,7 @@ end
 """
     CFModularityCNMLike(n::Int, reps::Int) <: AbstractCommunityFinder
 
-Represents a CNM-Like algorithm for finding communities. 
+Represents a CNM-Like algorithm for finding communities.
 In the algorithm we start with a partition where each node is in its own part.
 Then in each step, we randomly select a hyperedge.
 Subsequently, we consider merging each set of that parts it touches.
@@ -142,7 +197,7 @@ The algortithm iterates through `reps` of repetitions.
 For more information see `Algorithm 1` at:
 Clustering via Hypergraph Modularity (submitted to Plos ONE), auhtors:
 Bogumil Kaminski, Valerie Poulin, Pawel Pralat, Przemyslaw Szufel, Francois Theberge
-    
+
 """
 struct CFModularityCNMLike <: AbstractCommunityFinder
     reps::Int
@@ -151,21 +206,21 @@ end
 """
     findcommunities(h::Hypergraph, method::CFModularityCNMLike)
 
-Iterates a CNM-Like algorithm for finding communities. 
+Iterates a CNM-Like algorithm for finding communities.
 In the algorithm we start with a partition where each node is in its own part.
-Then in each step, we randomly select a hyperedge.  
-Subsequently, we consider merging each set of that parts it touches. 
+Then in each step, we randomly select a hyperedge.
+Subsequently, we consider merging each set of that parts it touches.
 We actually merge the parts if the new best modularity is at least as high
-as the modularity from the previous step. 
+as the modularity from the previous step.
 
 Returns a `NamedTuple` where the field `bp` contains partition
 and the field `bm` contains the modularity value for that partition,
-finally, the fiel `mod_history` represents modularities achieved 
+finally, the fiel `mod_history` represents modularities achieved
 in subsequent steps of the algorithm.
 
 For more information see `Algorithm 1` at:
 Clustering via Hypergraph Modularity (submitted to Plos ONE), authors:
-Bogumil Kaminski, Valerie Poulin, Pawel Pralat, Przemyslaw Szufel, 
+Bogumil Kaminski, Valerie Poulin, Pawel Pralat, Przemyslaw Szufel,
 Francois Theberge.
 
 """
